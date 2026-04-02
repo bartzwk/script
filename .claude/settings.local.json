@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(grep -E \"\\\\.\\(py|xls|xlsx\\)$\")",
+      "Bash(python3)",
+      "Bash(python3 -c \"import xlrd; print\\(xlrd.__version__\\)\")",
+      "Bash(/c/Users/Bartek/AppData/Local/Programs/Python/Python313/python)",
+      "Bash(PYTHONIOENCODING=utf-8 /c/Users/Bartek/AppData/Local/Programs/Python/Python313/python)"
+    ]
+  }
+}
