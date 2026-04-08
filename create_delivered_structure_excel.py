@@ -24,6 +24,7 @@ OUTPUT_COLUMNS = [
     "Część 1 / Part 1",
     "Część 2 / Part 2",
     "Konstrukcja / Construction",
+    "Typ stali / Steel type",
     "Ilość / Quantity",
     "Nazwa opisowa / Name",
     "Długość (mm) / Length (mm)",
@@ -332,6 +333,7 @@ def row_to_record(row: List[object], header_map: Dict[str, int], meta: Dict[str,
         "surface": get("surface"),
         "class_grade": get("class") or get("grade"),
         "included": get("included"),
+        "steel_type": meta.get("steel_type", ""),
         "source_file": meta["rel_path"],
         "source_row_number": source_row_number,
     }
@@ -402,6 +404,16 @@ def collect_files(root_dir: str) -> List[Dict[str, str]]:
 
                 revision = extract_revision_from_text(rel_path)
 
+                steel_type = ""
+                for part in parts:
+                    p_norm = normalize_text(part)
+                    if "goracowalcowane" in p_norm:
+                        steel_type = "gorącowalcowane"
+                        break
+                    elif "zimnogiete" in p_norm:
+                        steel_type = "zimnogięte"
+                        break
+
                 item = {
                     "path": full_path,
                     "rel_path": rel_path,
@@ -410,6 +422,7 @@ def collect_files(root_dir: str) -> List[Dict[str, str]]:
                     "company": company,
                     "zone": zone,
                     "revision": revision,
+                    "steel_type": steel_type,
                 }
                 print(f"[USE:{reason}] {rel_path} | company={company}")
                 found.append(item)
@@ -453,26 +466,25 @@ def parse_number_fields(number: object, zone_from_path: str = "", company_from_m
         s = s[m_zone.end():]
 
     symbol = company_from_meta if company_from_meta in {"GT", "KG"} else ""
-    m_symbol = re.match(r"^(GT|KG)(?:\b|[_-])", s, flags=re.IGNORECASE)
+    m_symbol = re.search(r"(?:^|[-_ ])(GT|KG)(?:[-_ ]|$)", s, flags=re.IGNORECASE)
     if m_symbol:
         symbol = m_symbol.group(1).upper()
-        s = s[m_symbol.end():]
-        s = re.sub(r"^[_ -]+", "", s)
+        rest = s[m_symbol.end():].strip("_- ")
+    else:
+        rest = s.strip("_- ")
 
-    s = s.strip("_- ")
-    m_num = re.search(r"(?:-|_)?(\d+)$", s)
+    m_num = re.search(r"(?:[-_])?(\d+)$", rest)
     element_number: object = ""
     element = ""
     if m_num:
         element_number = int(m_num.group(1))
-        prefix = s[:m_num.start()].rstrip("-_ ")
-        element = prefix
+        element = rest[:m_num.start()].strip("_- ")
     else:
-        element = s
+        element = rest.strip("_- ")
 
     element = re.sub(r"\s+", " ", element).strip()
-    if element == "_":
-        element = ""
+    if not element:
+        element = "_"
 
     if rev_val not in (None, ""):
         name_prefix = f"R{int(rev_val)}_"
@@ -532,6 +544,7 @@ def build_output_row(rec: Dict[str, object]) -> Dict[str, object]:
         "part1": parsed["part1"],
         "part2": parsed["part2"],
         "construction": parsed["construction"],
+        "steel_type": rec.get("steel_type", "") if parsed["construction"] == "ceiling sub" else "",
         "quantity": excel_number(rec.get("quantity", "")),
         "name": rec.get("name", ""),
         "length": excel_number(rec.get("length", "")),
@@ -572,6 +585,7 @@ def write_output_xls(output_path: str, rows: List[Dict[str, object]]) -> None:
             row.get("part1", ""),
             row.get("part2", ""),
             row.get("construction", ""),
+            row.get("steel_type", ""),
             row.get("quantity", ""),
             row.get("name", ""),
             row.get("length", ""),
@@ -584,7 +598,7 @@ def write_output_xls(output_path: str, rows: List[Dict[str, object]]) -> None:
             row.get("source_file", ""),
             row.get("source_row_number", ""),
         ]
-        int_cols = {4, 5, 9, 19}
+        int_cols = {4, 5, 10, 20}
         for c, value in enumerate(values):
             if isinstance(value, int):
                 ws.write(r, c, value, int_style if c in int_cols else num_style)
@@ -594,7 +608,7 @@ def write_output_xls(output_path: str, rows: List[Dict[str, object]]) -> None:
                 ws.write(r, c, value)
 
     widths = [
-        28, 10, 20, 14, 16, 12, 12, 12, 18,
+        28, 10, 20, 14, 16, 12, 12, 12, 18, 20,
         10, 32, 14, 18, 18, 20, 20, 22, 34, 60, 14,
     ]
     for idx, width in enumerate(widths):
