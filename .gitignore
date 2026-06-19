@@ -1,0 +1,9 @@
+# Generated output (Excel masters, assembled BOMs, find_results TXT)
+out/
+
+# Python
+__pycache__/
+*.pyc
+
+# Excel temp files
+~$*

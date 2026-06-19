@@ -10,7 +10,9 @@ import pandas as pd
 # CONFIG
 # =========================================================
 ROOT_DIR = r"C:\Users\Bartek\Desktop\GEMTECH\CP1\script"
-OUTPUT_XLSX = os.path.join(ROOT_DIR, "_MASTER_CP1.xlsx")
+# Generated files go to ./out next to this script
+OUT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "out")
+OUTPUT_XLSX = os.path.join(OUT_DIR, "_MASTER_CP1.xlsx")
 
 FIXED_DATA_COLUMNS = [
     "Numer Number",
@@ -801,6 +803,7 @@ def autosize_worksheet(ws, dataframe):
 
 
 def export_to_excel(df_data, df_files, df_columns, output_path):
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
     with pd.ExcelWriter(output_path, engine="openpyxl") as writer:
         df_data.to_excel(writer, sheet_name="DATA", index=False)
         df_files.to_excel(writer, sheet_name="FILES", index=False)
