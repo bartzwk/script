@@ -6,12 +6,18 @@ de cada sección del proyecto FA1.
 
 Uso:
     python find_text_in_pdfs.py "texto1" "texto2" "texto3"
+    python find_text_in_pdfs.py CP1 "texto1"                 (proyecto explícito)
 
 Si no se dan argumentos en línea de comandos, se usa la lista SEARCH_TEXTS
 definida en CONFIG más abajo.
 
+Guardar log (por defecto NO se guarda — solo se muestra en consola):
+    --log                 -> guarda en la carpeta out
+    --log <ruta>          -> guarda en esa ruta (carpeta, o fichero .txt)
+    --log=<ruta>          -> idem
+
 Salida:
-    Consola  + fichero TXT  →  find_results_<timestamp>.txt
+    Consola siempre. Fichero TXT (find_results_<timestamp>.txt) solo con --log.
 """
 
 import logging
@@ -20,7 +26,6 @@ import re
 import sys
 import unicodedata
 from datetime import datetime
-from pathlib import Path
 from typing import List
 
 logging.getLogger("pypdf").setLevel(logging.ERROR)
@@ -62,13 +67,29 @@ _enable_windows_ansi()
 USE_HYPERLINKS = sys.stdout.isatty()
 
 
+def _to_file_uri(path: str) -> str:
+    """
+    Build a file:// URI that Windows opens correctly.
+
+    NOTE: do NOT use pathlib.Path.as_uri() — it percent-encodes non-ASCII as
+    UTF-8 (e.g. 'ł' -> %C5%82), and Windows' URL->path conversion decodes those
+    bytes as ANSI, producing a broken path that ShellExecute fails to open
+    silently. Keeping the Unicode characters literal makes Windows resolve the
+    real path; we only escape the few ASCII chars that would break URI parsing.
+    """
+    p = os.path.abspath(path).replace("\\", "/")
+    for ch, esc in (("%", "%25"), ("#", "%23"), ("?", "%3F"), (" ", "%20")):
+        p = p.replace(ch, esc)
+    return "file:///" + p
+
+
 def file_link(path: str, label: str = None) -> str:
     """Return an OSC 8 hyperlink to a file, or the plain path when not a TTY."""
     text = label or path
     if not USE_HYPERLINKS:
         return text
     try:
-        uri = Path(path).resolve().as_uri()
+        uri = _to_file_uri(path)
     except Exception:
         return text
     esc = "\x1b"
@@ -132,9 +153,6 @@ def normalize(text: str) -> str:
     s = s.replace("\xa0", " ")
     s = strip_accents(s)
     s = s.lower()
-    # Unify separators so codes match regardless of style:
-    # 'CP1_B_GT_900' (Excel) == 'CP1-B-GT-900' (drawings) == 'CP1 B GT 900'
-    s = re.sub(r"[_\-/]", " ", s)
     s = re.sub(r"\s+", " ", s).strip()
     return s
 
@@ -391,12 +409,59 @@ def search_all(root_dir: str, sections: List[str], queries: List[str]) -> str:
 
 # ─── entrada ─────────────────────────────────────────────
 
+def _looks_like_path(s: str) -> bool:
+    """Heurística: una ruta lleva separador o unidad; un código de búsqueda no."""
+    return ("/" in s) or ("\\" in s) or (":" in s) or s.lower().endswith(".txt")
+
+
+def _resolve_log_path(log_target: str) -> str:
+    """Devuelve el fichero TXT a escribir según --log [ruta]."""
+    if not log_target:                       # --log a secas -> carpeta out
+        out_dir = OUTPUT_DIR or OUT_DIR
+        os.makedirs(out_dir, exist_ok=True)
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        return os.path.join(out_dir, f"find_results_{ts}.txt")
+    if log_target.lower().endswith(".txt"):  # --log ruta\fichero.txt
+        parent = os.path.dirname(log_target)
+        if parent:
+            os.makedirs(parent, exist_ok=True)
+        return log_target
+    os.makedirs(log_target, exist_ok=True)   # --log carpeta
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    return os.path.join(log_target, f"find_results_{ts}.txt")
+
+
 if __name__ == "__main__":
     _args = sys.argv[1:]
     _project = DEFAULT_PROJECT
     if _args and _args[0].upper() in PROJECT_CONFIGS:
         _project = _args[0].upper()
         _args = _args[1:]
+
+    # --log / --save: por defecto NO se guarda log. Con el flag sí:
+    #   --log            -> carpeta out
+    #   --log <ruta>     -> esa ruta (carpeta o fichero .txt)
+    #   --log=<ruta>     -> idem
+    save_log = False
+    log_target = None
+    rest = []
+    i = 0
+    while i < len(_args):
+        a = _args[i]
+        al = a.lower()
+        if al in ("--log", "--save", "-l"):
+            save_log = True
+            if i + 1 < len(_args) and _looks_like_path(_args[i + 1]):
+                log_target = _args[i + 1]
+                i += 2
+                continue
+        elif al.startswith("--log=") or al.startswith("--save="):
+            save_log = True
+            log_target = a.split("=", 1)[1]
+        else:
+            rest.append(a)
+        i += 1
+    _args = rest
 
     _cfg = PROJECT_CONFIGS[_project]
     queries = [q.strip() for q in _args if q.strip()] or SEARCH_TEXTS
@@ -410,11 +475,11 @@ if __name__ == "__main__":
     print(f"\n  Proyecto: {_project}  ({_cfg['root_dir']})")
     report = search_all(_cfg["root_dir"], _cfg["search_folders"], queries)
 
-    # Guardar TXT
-    out_dir = OUTPUT_DIR or OUT_DIR
-    os.makedirs(out_dir, exist_ok=True)
-    timestamp_file = datetime.now().strftime("%Y%m%d_%H%M%S")
-    out_path = os.path.join(out_dir, f"find_results_{timestamp_file}.txt")
-    with open(out_path, "w", encoding="utf-8") as f:
-        f.write(report)
-    print(f"\n[GUARDADO] {file_link(out_path)}")
+    # Guardar TXT solo si se pidió con --log
+    if save_log:
+        out_path = _resolve_log_path(log_target)
+        with open(out_path, "w", encoding="utf-8") as f:
+            f.write(report)
+        print(f"\n[GUARDADO] {file_link(out_path)}")
+    else:
+        print("\n[INFO] Log no guardado (usa --log [ruta] para guardarlo).")
